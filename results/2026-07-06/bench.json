@@ -1,0 +1,1 @@
+{"date":"2026-07-06","lumen_sha":"c54a25f","tiers":{"interp":{"composite":235,"benches":{"Richards":133,"DeltaBlue":149,"Crypto":157,"RayTrace":344,"EarleyBoyer":358,"RegExp":104,"Splay":756,"NavierStokes":308}},"bytecode":{"composite":318,"benches":{"Richards":149,"DeltaBlue":154,"Crypto":369,"RayTrace":408,"EarleyBoyer":375,"RegExp":104,"Splay":906,"NavierStokes":849}}}}
