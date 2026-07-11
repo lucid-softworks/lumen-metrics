@@ -77,7 +77,7 @@ export default function Performance({ index, range }) {
             <LineChart
               key={name}
               title={name}
-              series={[{ key: name, label: name, color: topDef.color, values: view.map((n) => tierResult(n, topTierKey(n))?.benches?.[name] ?? null) }]}
+              series={[{ key: name, label: name, color: topDef.color, values: view.map((n) => tierResult(n, top)?.benches?.[name] ?? null) }]}
               dates={view.map((n) => n.date)}
               yFmt={(v) => fmtNum(Math.round(v))}
               height={140}

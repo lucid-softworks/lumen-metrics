@@ -40,7 +40,7 @@ export default function LineChart({
   const [showTable, setShowTable] = useState(false)
   const multi = series.length > 1
 
-  const M = { top: 14, right: multi ? 118 : 40, bottom: 26, left: 46 }
+  const M = { top: 14, right: multi ? 118 : 64, bottom: 26, left: 46 }
   const iw = Math.max(width - M.left - M.right, 40)
   const ih = height - M.top - M.bottom
 
