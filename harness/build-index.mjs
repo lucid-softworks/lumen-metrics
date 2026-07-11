@@ -49,6 +49,7 @@ for (const date of dates) {
       ? {
           tiers: bench.tiers ?? { default: { composite: bench.composite, benches: bench.benches } },
           references: bench.references ?? null,
+          ejs: bench.ejs ?? null,
         }
       : null,
   })

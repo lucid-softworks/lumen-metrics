@@ -326,6 +326,90 @@ async function benchReferences(files, driverFile) {
   return Object.keys(out).length ? out : null
 }
 
+// --- yt-dlp/ejs: real-world workload (parse YouTube's ~3 MB player with a
+// JS-in-JS parser, solve sig/nsig challenges, print results as JSON). Timed
+// wall-clock, lower is better; output is verified against node's answer so a
+// fast-but-wrong run can't score. Bundle is the lucid-softworks/lumen#12
+// reproducer, cached locally.
+const EJS_URL = 'https://github.com/user-attachments/files/29786020/code.js'
+const EJS_CACHE = join(HARNESS, '..', '.cache', 'ejs-code.js')
+
+async function ensureEjs() {
+  if (existsSync(EJS_CACHE)) return EJS_CACHE
+  log('ejs bundle missing — downloading…')
+  try {
+    mkdirSync(dirname(EJS_CACHE), { recursive: true })
+    const res = await fetch(EJS_URL)
+    if (!res.ok) throw new Error(String(res.status))
+    writeFileSync(EJS_CACHE, await res.text())
+    return EJS_CACHE
+  } catch (e) {
+    log(`ejs download failed: ${e.message}`)
+    return null
+  }
+}
+
+async function timeOnce(cmd, cmdArgs, env) {
+  const t0 = performance.now()
+  try {
+    const res = await run(cmd, cmdArgs, {
+      timeout: 1000 * 60 * 15,
+      maxBuffer: 1024 * 1024 * 16,
+      env: env ? { ...process.env, ...env } : process.env,
+    })
+    return { ms: Math.round(performance.now() - t0), out: res.stdout.trim() }
+  } catch {
+    return null
+  }
+}
+
+// median of 3 for fast configs; a single measurement is enough past 20 s
+async function timeEjs(label, cmd, cmdArgs, env) {
+  log(`timing ejs (${label})…`)
+  const first = await timeOnce(cmd, cmdArgs, env)
+  if (!first) {
+    log(`ejs (${label}) failed or timed out`)
+    return null
+  }
+  if (first.ms >= 20000) return { ms: first.ms, runs: 1, out: first.out }
+  const more = [await timeOnce(cmd, cmdArgs, env), await timeOnce(cmd, cmdArgs, env)].filter(Boolean)
+  const all = [first.ms, ...more.map((r) => r.ms)].sort((a, b) => a - b)
+  return { ms: all[Math.floor((all.length - 1) / 2)], runs: all.length, out: first.out }
+}
+
+async function runEjs(tiers) {
+  const file = await ensureEjs()
+  if (!file) return null
+  const out = { bytes: readFileSync(file).length, tiers: {}, references: {} }
+  let expected = null
+
+  for (const rt of REF_RUNTIMES) {
+    const resolved = resolveRuntime(rt.candidates, rt.versionArgs)
+    if (!resolved) continue
+    for (const mode of rt.modes) {
+      const r = await timeEjs(mode.key, resolved.cmd, mode.args(file), mode.env)
+      if (!r) continue
+      if (mode.key === 'node') expected = r.out
+      out.references[mode.key] = { version: resolved.version, ms: r.ms, runs: r.runs, out: r.out }
+    }
+  }
+  for (const tier of tiers) {
+    const r = await timeEjs(`lumen ${tier}`, bin('lumen'), tier === 'default' ? [file] : [`--tier=${tier}`, file])
+    if (r) out.tiers[tier] = { ms: r.ms, runs: r.runs, out: r.out }
+  }
+
+  // verify every run produced node's answer (or the first answer seen)
+  expected = expected ?? Object.values(out.references)[0]?.out ?? Object.values(out.tiers)[0]?.out
+  for (const group of [out.tiers, out.references]) {
+    for (const r of Object.values(group)) {
+      r.verified = r.out === expected
+      delete r.out
+    }
+  }
+  if (!Object.keys(out.tiers).length && !Object.keys(out.references).length) return null
+  return out
+}
+
 async function runBench() {
   // the bare `lumen` bin didn't exist for the earliest commits; without this
   // guard a lib-only `cargo build -p lumen` "succeeds" and the shared target
@@ -376,7 +460,8 @@ async function runBench() {
     log('bench produced no scores — null')
     return null
   }
-  return { date: DATE, lumen_sha: SHA, tiers: out, references }
+  const ejs = await runEjs(tiers)
+  return { date: DATE, lumen_sha: SHA, tiers: out, references, ejs }
 }
 
 const ONLY = args.only || null
