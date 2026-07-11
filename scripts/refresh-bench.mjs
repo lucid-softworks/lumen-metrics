@@ -2,7 +2,9 @@
 // checking out each night's recorded lumen commit and rewriting bench.json
 // (per-tier scores, or null for commits with no bare `lumen` binary).
 //
-//   node scripts/refresh-bench.mjs [--lumen <repo>]
+//   node scripts/refresh-bench.mjs [--lumen <repo>] [--dates <d1,d2,…>]
+//
+// --dates forces a re-run of just those nights, bypassing the already-tiered skip.
 //
 // Exists to repair nights benched before the stale-binary guard and tier
 // support landed in run-night.mjs. Does not touch test262/surface results and
@@ -25,14 +27,15 @@ const sh = (cmd, a, opts = {}) => execFileSync(cmd, a, { stdio: 'inherit', ...op
 
 if (!existsSync(WT)) git(LUMEN, 'worktree', 'add', '--detach', WT, 'main')
 
-const dates = readdirSync(join(ROOT, 'results'), { withFileTypes: true })
+const forced = args.dates ? args.dates.split(',') : null
+const dates = forced ?? readdirSync(join(ROOT, 'results'), { withFileTypes: true })
   .filter((d) => d.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d.name))
   .map((d) => d.name)
   .sort()
 
 for (const date of dates) {
   const benchPath = join(ROOT, 'results', date, 'bench.json')
-  if (existsSync(benchPath) && readFileSync(benchPath, 'utf8').includes('"tiers"')) {
+  if (!forced && existsSync(benchPath) && readFileSync(benchPath, 'utf8').includes('"tiers"')) {
     console.log(`[${date}] already tiered — skipping`)
     continue
   }

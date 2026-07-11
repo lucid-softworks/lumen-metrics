@@ -212,16 +212,7 @@ async function ensureV8() {
   }
 }
 
-async function benchOneTier(files, driverFile, tierFlag) {
-  let stdout = ''
-  try {
-    const args = tierFlag ? [tierFlag, ...files, driverFile] : [...files, driverFile]
-    const res = await run(bin('lumen'), args, { timeout: 1000 * 60 * 15, maxBuffer: 1024 * 1024 * 16 })
-    stdout = res.stdout
-  } catch (e) {
-    stdout = e.stdout || ''
-    log(`bench run (${tierFlag || 'default'}) ended early: ${e.message.split('\n')[0]}`)
-  }
+function parseBenchOutput(stdout) {
   const benches = {}
   for (const line of stdout.split('\n')) {
     const m = /^([A-Za-z]+): (\d+)/.exec(line.trim())
@@ -232,6 +223,92 @@ async function benchOneTier(files, driverFile, tierFlag) {
   const composite = benches.__composite ?? null
   delete benches.__composite
   return Object.keys(benches).length ? { composite, benches } : null
+}
+
+async function benchProcess(label, cmd, cmdArgs, env) {
+  let stdout = ''
+  try {
+    const res = await run(cmd, cmdArgs, {
+      timeout: 1000 * 60 * 15,
+      maxBuffer: 1024 * 1024 * 16,
+      env: env ? { ...process.env, ...env } : process.env,
+    })
+    stdout = res.stdout
+  } catch (e) {
+    stdout = e.stdout || ''
+    log(`bench run (${label}) ended early: ${e.message.split('\n')[0]}`)
+  }
+  return parseBenchOutput(stdout)
+}
+
+// Reference runtimes, re-measured every night so the comparison is always
+// same-machine, same-night. Each runs the suite full and JIT-disabled — the
+// jitless mode is the like-for-like comparison while lumen's own JIT matures.
+// They take one script, so the suite gets concatenated (with a d8-style
+// print() shim the upstream driver expects).
+const REF_RUNTIMES = [
+  {
+    key: 'node',
+    candidates: [process.env.NODE_BIN, 'node'],
+    modes: [
+      { key: 'node', args: (f) => [f] },
+      { key: 'node-jitless', args: (f) => ['--jitless', f] },
+    ],
+  },
+  {
+    key: 'bun',
+    candidates: [process.env.BUN_BIN, 'bun', `${process.env.HOME}/.bun/bin/bun`],
+    modes: [
+      { key: 'bun', args: (f) => [f] },
+      { key: 'bun-jitless', args: (f) => [f], env: { BUN_JSC_useJIT: 'false' } },
+    ],
+  },
+  {
+    key: 'deno',
+    candidates: [process.env.DENO_BIN, 'deno', '/opt/homebrew/bin/deno', `${process.env.HOME}/.deno/bin/deno`],
+    // --allow-read: deno's CommonJS compat layer needs it to load the .cjs suite
+    modes: [
+      { key: 'deno', args: (f) => ['run', '--allow-read', f] },
+      { key: 'deno-jitless', args: (f) => ['run', '--allow-read', '--v8-flags=--jitless', f] },
+    ],
+  },
+]
+
+function resolveRuntime(candidates) {
+  for (const c of candidates.filter(Boolean)) {
+    try {
+      const v = execFileSync(c, ['--version'], { encoding: 'utf8', timeout: 10000 })
+      return { cmd: c, version: v.trim().split('\n')[0].replace(/^deno /, '').split(' ')[0].replace(/^v/, '') }
+    } catch { /* try next */ }
+  }
+  return null
+}
+
+async function benchReferences(files, driverFile) {
+  const shim = 'if (typeof print === "undefined") { globalThis.print = function () { console.log(Array.prototype.join.call(arguments, " ")); }; }\n'
+  // .cjs so every runtime executes it as sloppy-mode CommonJS — deno runs plain
+  // .js as a strict ES module, which the 2008-era suite code can't survive
+  const suite = shim + [...files, driverFile].map((f) => readFileSync(f, 'utf8')).join('\n;\n')
+  const suiteFile = join(OUT, '.ref-suite.cjs')
+  writeFileSync(suiteFile, suite)
+  const out = {}
+  try {
+    for (const rt of REF_RUNTIMES) {
+      const resolved = resolveRuntime(rt.candidates)
+      if (!resolved) {
+        log(`reference runtime ${rt.key} not found — skipping`)
+        continue
+      }
+      for (const mode of rt.modes) {
+        log(`running v8-v7 bench (${mode.key} ${resolved.version})…`)
+        const r = await benchProcess(mode.key, resolved.cmd, mode.args(suiteFile), mode.env)
+        if (r) out[mode.key] = { version: resolved.version, ...r }
+      }
+    }
+  } finally {
+    rmSync(suiteFile, { force: true })
+  }
+  return Object.keys(out).length ? out : null
 }
 
 async function runBench() {
@@ -269,12 +346,14 @@ async function runBench() {
     .map((f) => join(V8DIR, f))
 
   const out = {}
+  let references = null
   try {
     for (const tier of tiers) {
       log(`running v8-v7 bench (${tier})…`)
-      const r = await benchOneTier(files, driverFile, tier === 'default' ? null : `--tier=${tier}`)
+      const r = await benchProcess(tier, bin('lumen'), tier === 'default' ? [...files, driverFile] : [`--tier=${tier}`, ...files, driverFile])
       if (r) out[tier] = r
     }
+    references = await benchReferences(files, driverFile)
   } finally {
     rmSync(driverFile, { force: true })
   }
@@ -282,7 +361,7 @@ async function runBench() {
     log('bench produced no scores — null')
     return null
   }
-  return { date: DATE, lumen_sha: SHA, tiers: out }
+  return { date: DATE, lumen_sha: SHA, tiers: out, references }
 }
 
 const ONLY = args.only || null

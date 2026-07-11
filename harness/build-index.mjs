@@ -35,6 +35,7 @@ for (const date of dates) {
   nights.push({
     date,
     lumen_sha: t262?.lumen_sha ?? surfaces?.lumen_sha ?? bench?.lumen_sha ?? null,
+    test262_sha: t262?.test262_sha ?? null,
     test262: t262
       ? { pass: t262.total.pass, fail: t262.total.fail, skip: t262.total.skip, total: t262.total.pass + t262.total.fail + t262.total.skip }
       : null,
@@ -45,7 +46,10 @@ for (const date of dates) {
     bun: surfaces?.bun ? sumModules(surfaces.bun.surfaces) : null,
     // normalize pre-tier bench files ({composite, benches}) to a single default tier
     bench: bench
-      ? { tiers: bench.tiers ?? { default: { composite: bench.composite, benches: bench.benches } } }
+      ? {
+          tiers: bench.tiers ?? { default: { composite: bench.composite, benches: bench.benches } },
+          references: bench.references ?? null,
+        }
       : null,
   })
 }
