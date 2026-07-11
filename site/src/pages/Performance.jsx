@@ -58,14 +58,21 @@ export default function Performance({ index, range }) {
 
       <LineChart
         title="Composite score by tier, nightly"
-        caption="V8 v7 suite geomean per execution tier. The jit series starts the night the tier landed. Scores from repeated runs vary a few percent; judge trends, not single nights."
-        series={activeTiers.map((t) => ({
-          key: t.key, label: t.label, short: t.label, color: t.color,
-          values: view.map(composite(t.key)),
-        }))}
+        caption="V8 v7 suite geomean per execution tier. Gray lines are interpreter-class references measured the same night (JIT disabled, plus QuickJS) — full-JIT engines run 25-35× higher and live in the comparison below. Scores vary a few percent run to run; judge trends, not single nights."
+        series={[
+          ...activeTiers.map((t) => ({
+            key: t.key, label: t.label, short: t.label, color: t.color,
+            values: view.map(composite(t.key)),
+          })),
+          // same-magnitude context; identity via end labels + tooltip, not hue
+          ...REF_DEFS.filter((d) => d.key.endsWith('-jitless') || d.key === 'quickjs').map((d) => ({
+            key: d.key, label: d.label, short: d.label, color: 'var(--muted)',
+            values: view.map((n) => n.bench?.references?.[d.key]?.composite ?? null),
+          })),
+        ]}
         dates={view.map((n) => n.date)}
         yFmt={(v) => fmtNum(Math.round(v))}
-        height={280}
+        height={300}
         metaFor={(i) => (view[i]?.lumen_sha ? `lumen ${view[i].lumen_sha}` : null)}
       />
 
