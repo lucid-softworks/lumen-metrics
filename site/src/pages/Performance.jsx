@@ -1,5 +1,5 @@
 import { sliceRange, spark } from '../lib/data.js'
-import { fmtNum } from '../lib/format.js'
+import { fmtNum, fmtMs } from '../lib/format.js'
 import StatTile from '../components/StatTile.jsx'
 import LineChart from '../components/LineChart.jsx'
 import BarChart from '../components/BarChart.jsx'
@@ -78,6 +78,8 @@ export default function Performance({ index, range }) {
 
       <RuntimeComparison last={last} activeTiers={activeTiers} />
 
+      <EjsSection view={view} last={last} activeTiers={activeTiers} top={top} topDef={topDef} />
+
       <section>
         <h2 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--ink)' }}>Per benchmark — {topDef.label} tier</h2>
         <p className="text-[12.5px] mb-3" style={{ color: 'var(--muted)' }}>
@@ -149,6 +151,59 @@ function RuntimeComparison({ last, activeTiers }) {
       rows={rows}
       detail={detail}
     />
+  )
+}
+
+// yt-dlp/ejs: real-world challenge-solver workload, wall-clock, lower is better
+function EjsSection({ view, last, activeTiers, top, topDef }) {
+  const ejs = last.bench?.ejs
+  if (!ejs) return null
+  const nightEjs = (n) => n.bench?.ejs ?? null
+
+  const rows = [
+    ...activeTiers
+      .filter((t) => ejs.tiers?.[t.key])
+      .map((t) => ({
+        key: `lumen-${t.key}`, label: `lumen ${t.label}`, sub: last.lumen_sha,
+        value: ejs.tiers[t.key].ms, verified: ejs.tiers[t.key].verified,
+        color: t.color, emphasis: true,
+      })),
+    ...REF_DEFS.filter((d) => ejs.references?.[d.key]).map((d) => ({
+      key: d.key, label: d.label, sub: ejs.references[d.key].version,
+      value: ejs.references[d.key].ms, verified: ejs.references[d.key].verified,
+      color: 'var(--axis)', emphasis: false,
+    })),
+  ].sort((a, b) => a.value - b.value)
+
+  const unverified = rows.filter((r) => !r.verified)
+
+  return (
+    <div className="flex flex-col gap-4">
+      <LineChart
+        title="Real-world: yt-dlp/ejs challenge solver, nightly"
+        caption={`Wall-clock to parse YouTube's ${(ejs.bytes / 1e6).toFixed(1)} MB player with a JS-in-JS parser and solve its sig/nsig challenges (yt-dlp/ejs). Lower is better. Gray lines are the other runtimes, measured the same night; every run's output is verified against node's answer.`}
+        series={[
+          {
+            key: 'lumen', label: `lumen ${topDef.label}`, short: `lumen ${topDef.label}`, color: topDef.color,
+            values: view.map((n) => nightEjs(n)?.tiers?.[top]?.ms ?? null),
+          },
+          ...REF_DEFS.map((d) => ({
+            key: d.key, label: d.label, short: d.label, color: 'var(--muted)',
+            values: view.map((n) => nightEjs(n)?.references?.[d.key]?.ms ?? null),
+          })),
+        ]}
+        dates={view.map((n) => n.date)}
+        yFmt={fmtMs}
+        height={280}
+        metaFor={(i) => (view[i]?.lumen_sha ? `lumen ${view[i].lumen_sha}` : null)}
+      />
+      <BarChart
+        title={`yt-dlp/ejs — ${last.date}`}
+        caption={`Fastest first — shorter is faster. ${unverified.length ? `⚠ unverified output: ${unverified.map((r) => r.label).join(', ')}.` : 'All outputs verified identical.'}`}
+        rows={rows}
+        valueFmt={fmtMs}
+      />
+    </div>
   )
 }
 

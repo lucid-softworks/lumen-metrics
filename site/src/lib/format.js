@@ -31,6 +31,12 @@ export const fmtDateLong = (iso) =>
     timeZone: 'UTC',
   })
 
+export const fmtMs = (ms) => {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`
+}
+
 export const fmtDelta = (d, digits = 2) => {
   if (d === 0) return '±0'
   const s = Math.abs(d) < 0.005 && digits > 0 ? d.toFixed(3) : d.toFixed(digits)

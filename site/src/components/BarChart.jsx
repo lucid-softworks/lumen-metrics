@@ -6,7 +6,7 @@ import { fmtNum } from '../lib/format.js'
  * rows: [{ key, label, sub, value, color, emphasis }] — pre-sorted by caller.
  * detail: optional { columns: [name], rows: [{ label, values: [] }] } for the table view.
  */
-export default function BarChart({ title, caption, rows, detail, height = 26 }) {
+export default function BarChart({ title, caption, rows, detail, height = 26, valueFmt = fmtNum }) {
   const [showTable, setShowTable] = useState(false)
   const [hover, setHover] = useState(null)
   const max = Math.max(...rows.map((r) => r.value)) || 1
@@ -43,7 +43,7 @@ export default function BarChart({ title, caption, rows, detail, height = 26 }) 
                 <tr key={r.label} style={{ borderTop: '1px solid var(--grid)' }}>
                   <td className="py-1 pr-3" style={{ color: 'var(--ink)' }}>{r.label}</td>
                   {r.values.map((v, i) => (
-                    <td key={i} className="py-1 pr-3 text-right" style={{ color: 'var(--ink-2)' }}>{v == null ? '—' : fmtNum(v)}</td>
+                    <td key={i} className="py-1 pr-3 text-right" style={{ color: 'var(--ink-2)' }}>{v == null ? '—' : valueFmt(v)}</td>
                   ))}
                 </tr>
               ))}
@@ -77,7 +77,7 @@ export default function BarChart({ title, caption, rows, detail, height = 26 }) 
                       transition: 'opacity 120ms',
                     }}
                   />
-                  <span className="text-[12px] font-semibold tnum shrink-0" style={{ color: 'var(--ink)' }}>{fmtNum(r.value)}</span>
+                  <span className="text-[12px] font-semibold tnum shrink-0" style={{ color: 'var(--ink)' }}>{valueFmt(r.value)}</span>
                 </div>
               </div>
             )
