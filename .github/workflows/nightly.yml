@@ -1,0 +1,105 @@
+# Nightly metrics: build lumen@main, run every suite, commit the results, and
+# deploy the dashboard to GitHub Pages.
+#
+# Runs at 03:30 UTC — 30 minutes after lumen's own 03:00 nightly — so we always
+# measure the same code that night's lumen release was cut from. Labels the
+# night with the run date, matching the backfill's 03:00-cutoff convention.
+#
+# The suites run on the self-hosted mac-mini runner (labels: macmini) — it is
+# 2-3× faster than a hosted runner and keeps a warm cargo cache in
+# /tmp/lumen-build. The Pages deploy runs on a disposable hosted runner.
+#
+# One-time repo setup: Settings → Pages → Source: "GitHub Actions".
+
+name: nightly
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency: nightly
+
+env:
+  # Pin the suite so score movement is always lumen's, never upstream churn.
+  # Bump deliberately (and note it) when refreshing the suite.
+  TEST262_SHA: d1d583db95a521218f3eb8341a887fd63eda8ff1
+
+jobs:
+  suites:
+    runs-on: [self-hosted, macmini]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lumen@main
+        uses: actions/checkout@v4
+        with:
+          repository: lucid-softworks/lumen
+          path: lumen-src
+
+      - name: Checkout pinned test262
+        run: |
+          if [ ! -d test262-suite/.git ]; then
+            git init -q test262-suite
+            git -C test262-suite remote add origin https://github.com/tc39/test262
+          fi
+          git -C test262-suite fetch -q --depth 1 origin "$TEST262_SHA"
+          git -C test262-suite checkout -q FETCH_HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run suites
+        env:
+          CARGO_TARGET_DIR: /tmp/lumen-build
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          DATE=$(date -u +%F)
+          SHA=$(git -C lumen-src rev-parse --short HEAD)
+          echo "DATE=$DATE" >> "$GITHUB_ENV"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          node harness/run-night.mjs \
+            --lumen lumen-src --date "$DATE" --sha "$SHA" \
+            --test262 test262-suite --v8 v8-v7 --out results
+          node harness/build-index.mjs
+
+      - name: Commit results
+        run: |
+          git config user.name 'lumen nightly'
+          git config user.email 'actions@users.noreply.github.com'
+          git add results
+          git commit -m "chore(results): nightly $DATE (lumen $SHA)" || { echo 'nothing to commit'; exit 0; }
+          git pull --rebase origin main
+          git push
+
+  deploy:
+    needs: suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # pick up the results commit the suites job just pushed
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build site
+        run: |
+          cd site
+          npm ci
+          BASE_PATH=/lumen-metrics/ npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+      - uses: actions/deploy-pages@v4

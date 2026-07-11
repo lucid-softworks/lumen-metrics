@@ -1,18 +1,14 @@
-// Generates mock nightly results into site/public/results/ so the site can be
-// designed against realistic data. The real harness will write the same schema
-// into results/ at the repo root.
-//
-//   results/index.json          — one row per night (what charts load)
-//   results/<date>/test262.json — per-category breakdown + failing test paths
-//   results/<date>/surfaces.json— WinterTC / Node / Bun surface detail
+// Generates MOCK nightly results for chart design work, in the same schema the
+// real harness (harness/run-night.mjs) writes into results/. Writes to /tmp by
+// default so it can never clobber real data; point the site at it with a
+// symlink or MOCK_OUT if you need it.
 //
 // Deterministic (seeded PRNG) so re-runs produce identical output.
 
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'site', 'public', 'results')
+const OUT = process.env.MOCK_OUT || '/tmp/lumen-metrics-mock-results'
 
 let seed = 0x10e5
 function rand() {

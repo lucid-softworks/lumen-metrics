@@ -1,4 +1,2 @@
-# generated mock data for site design; real results live in results/
-site/public/results/
 site/dist/
 .DS_Store

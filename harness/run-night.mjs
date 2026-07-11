@@ -1,0 +1,267 @@
+// Runs every suite against one lumen checkout and writes one night of results:
+//
+//   node harness/run-night.mjs --lumen <checkout> --date YYYY-MM-DD --sha <sha> \
+//        [--test262 <suite dir>] [--v8 <v8-v7 dir>] [--out <results dir>]
+//
+// Produces <out>/<date>/{test262.json,surfaces.json,bench.json}. Suites that a
+// given commit cannot support yet (e.g. lumen-cli before it existed) are written
+// as null so the site can show honest gaps. Used by both the backfill and the
+// nightly CI job. Binaries build into CARGO_TARGET_DIR (defaults to
+// <checkout>/target), so a shared cache dir makes multi-night runs cheap.
+
+import { execFile, execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
+
+const HARNESS = dirname(fileURLToPath(import.meta.url))
+const run = promisify(execFile)
+
+const args = {}
+for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, '')] = process.argv[i + 1]
+const LUMEN = resolve(args.lumen)
+const DATE = args.date
+const SHA = args.sha
+const T262 = args.test262 ? resolve(args.test262) : join(LUMEN, 'test262')
+const V8DIR = args.v8 ? resolve(args.v8) : join(LUMEN, 'v8-v7')
+const OUT = join(resolve(args.out || join(HARNESS, '..', 'results')), DATE)
+if (!LUMEN || !DATE || !SHA) {
+  console.error('usage: run-night.mjs --lumen <dir> --date <date> --sha <sha>')
+  process.exit(2)
+}
+const TARGET = process.env.CARGO_TARGET_DIR || join(LUMEN, 'target')
+const CARGO = process.env.CARGO || join(process.env.HOME, '.cargo', 'bin', 'cargo')
+const bin = (name) => join(TARGET, 'release', name)
+const T262_TARGETS = ['annexB', 'built-ins', 'harness', 'intl402', 'language']
+const FAILING_CAP = 3000
+
+const log = (m) => console.log(`[${DATE}] ${m}`)
+
+function cargoBuild(pkgs) {
+  try {
+    execFileSync(CARGO, ['build', '--release', '-q', ...pkgs.flatMap((p) => ['-p', p])], {
+      cwd: LUMEN,
+      env: { ...process.env, CARGO_TARGET_DIR: TARGET },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runTest262() {
+  log('building test262-runner…')
+  if (!cargoBuild(['test262-runner'])) {
+    log('test262-runner failed to build — recording null')
+    return null
+  }
+  rmSync(join(LUMEN, 'test262-report'), { recursive: true, force: true })
+  log(`running test262 (${T262_TARGETS.join(', ')})…`)
+  const t0 = Date.now()
+  let stdout = ''
+  try {
+    const res = await run(bin('test262-runner'), T262_TARGETS, {
+      cwd: LUMEN,
+      env: { ...process.env, TEST262: T262, T262_SAMPLES: '1', T262_CAP: '1000000' },
+      maxBuffer: 1024 * 1024 * 512,
+      timeout: 1000 * 60 * 90,
+    })
+    stdout = res.stdout
+  } catch (e) {
+    // nonzero exit still leaves the report + stdout; salvage what we can
+    stdout = e.stdout || ''
+    if (!stdout) {
+      log(`test262 run died: ${e.message}`)
+      return null
+    }
+  }
+  log(`test262 finished in ${((Date.now() - t0) / 60000).toFixed(1)} min`)
+
+  const summaryPath = join(LUMEN, 'test262-report', 'summary.json')
+  if (!existsSync(summaryPath)) {
+    log('no summary.json — recording null')
+    return null
+  }
+  const summary = JSON.parse(readFileSync(summaryPath, 'utf8'))
+
+  // failing paths appear after "sample failures:" as "  <rel>\n      <why>"
+  const failing = []
+  const tail = stdout.split('sample failures:')[1] || ''
+  for (const line of tail.split('\n')) {
+    const m = /^ {2}(\S+\.js)$/.exec(line)
+    if (m) failing.push(m[1])
+  }
+  failing.sort()
+  const total = summary.total
+  return {
+    date: DATE,
+    lumen_sha: SHA,
+    test262_sha: gitShort(T262),
+    targets: summary.targets,
+    total,
+    pass_rate: summary.pass_rate,
+    categories: summary.categories,
+    failing: failing.slice(0, FAILING_CAP),
+    failing_truncated: total.fail > Math.min(failing.length, FAILING_CAP),
+  }
+}
+
+function gitShort(dir) {
+  try {
+    return execFileSync('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
+  } catch {
+    return null
+  }
+}
+
+async function probe(script) {
+  const file = join(OUT, `.probe-${Math.random().toString(36).slice(2)}.mjs`)
+  writeFileSync(file, script)
+  try {
+    const { stdout } = await run(bin('lumen-cli'), [file], { timeout: 120000, maxBuffer: 1024 * 1024 * 64 })
+    const line = stdout.split('\n').find((l) => l.startsWith('@@RESULT@@'))
+    return line ? JSON.parse(line.slice('@@RESULT@@'.length)) : null
+  } catch (e) {
+    log(`probe failed: ${e.message.split('\n')[0]}`)
+    return null
+  } finally {
+    rmSync(file, { force: true })
+  }
+}
+
+async function runSurfaces() {
+  if (!existsSync(join(LUMEN, 'crates', 'lumen-cli'))) {
+    log('no lumen-cli crate at this commit — surfaces null')
+    return null
+  }
+  log('building lumen-cli…')
+  if (!cargoBuild(['lumen-cli'])) {
+    log('lumen-cli failed to build — surfaces null')
+    return null
+  }
+
+  const wintertc = JSON.parse(readFileSync(join(HARNESS, 'wintertc.json'), 'utf8'))
+  const node = JSON.parse(readFileSync(join(HARNESS, 'baselines', 'node.json'), 'utf8'))
+  const bun = JSON.parse(readFileSync(join(HARNESS, 'baselines', 'bun.json'), 'utf8'))
+
+  log('probing WinterTC globals…')
+  const wtc = await probe(`
+    const MIN = ${JSON.stringify(wintertc.minimum)};
+    const EXTRA = ${JSON.stringify(wintertc.beyond_minimum)};
+    const has = (n) => typeof globalThis[n] !== 'undefined';
+    console.log('@@RESULT@@' + JSON.stringify({
+      supported: MIN.filter(has),
+      missing: MIN.filter((n) => !has(n)),
+      beyond_minimum: EXTRA.filter(has),
+    }));
+  `)
+
+  const moduleProbe = (baseline, prefixless) => `
+    const BASELINE = ${JSON.stringify(baseline.modules)};
+    const out = [];
+    for (const [name, names] of Object.entries(BASELINE)) {
+      let ns = null;
+      try { ns = await import(${prefixless ? "'node:' + name" : 'name'}); } catch {}
+      const missing = names.filter((n) => !(ns && n in ns));
+      out.push({ name, total: names.length, have: names.length - missing.length, present: !!ns, missing });
+    }
+    console.log('@@RESULT@@' + JSON.stringify(out));
+  `
+  log('probing Node module surface…')
+  const nodeModules = await probe(moduleProbe(node, true))
+  log('probing Bun surface…')
+  const bunModules = await probe(moduleProbe(bun, false))
+
+  return {
+    date: DATE,
+    lumen_sha: SHA,
+    node_version: node.version,
+    bun_version: bun.version,
+    wintertc: wtc ? { ...wtc, total: wintertc.minimum.length } : null,
+    node: nodeModules ? { modules: nodeModules } : null,
+    bun: bunModules ? { surfaces: bunModules } : null,
+  }
+}
+
+const BENCH_LABELS = {
+  Richards: 'Richards', DeltaBlue: 'DeltaBlue', Crypto: 'Crypto', RayTrace: 'RayTrace',
+  EarleyBoyer: 'EarleyBoyer', RegExp: 'RegExp', Splay: 'Splay', NavierStokes: 'NavierStokes',
+}
+
+const V8_RAW = 'https://raw.githubusercontent.com/mozilla/arewefastyet/master/benchmarks/v8-v7'
+const V8_FILES = ['base.js', 'richards.js', 'deltablue.js', 'crypto.js', 'raytrace.js', 'earley-boyer.js', 'regexp.js', 'splay.js', 'navier-stokes.js', 'run.js']
+
+async function ensureV8() {
+  if (existsSync(join(V8DIR, 'base.js'))) return true
+  log('v8-v7 suite missing — downloading…')
+  try {
+    mkdirSync(V8DIR, { recursive: true })
+    for (const f of V8_FILES) {
+      const res = await fetch(`${V8_RAW}/${f}`)
+      if (!res.ok) throw new Error(`${res.status} ${f}`)
+      writeFileSync(join(V8DIR, f), await res.text())
+    }
+    return true
+  } catch (e) {
+    log(`v8-v7 download failed: ${e.message}`)
+    return false
+  }
+}
+
+async function runBench() {
+  if (!(await ensureV8())) {
+    log('no v8-v7 suite — bench null')
+    return null
+  }
+  log('building lumen (bare engine)…')
+  if (!cargoBuild(['lumen'])) {
+    log('lumen bin failed to build — bench null')
+    return null
+  }
+  // upstream run.js uses shell load(); the CLI takes files in sequence instead
+  const driver = readFileSync(join(V8DIR, 'run.js'), 'utf8').split('\n').filter((l) => !l.startsWith('load(')).join('\n')
+  const driverFile = join(OUT, '.driver.js')
+  writeFileSync(driverFile, driver)
+  const files = ['base.js', 'richards.js', 'deltablue.js', 'crypto.js', 'raytrace.js', 'earley-boyer.js', 'regexp.js', 'splay.js', 'navier-stokes.js']
+    .map((f) => join(V8DIR, f))
+  log('running v8-v7 bench…')
+  let stdout = ''
+  try {
+    const res = await run(bin('lumen'), [...files, driverFile], { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 16 })
+    stdout = res.stdout
+  } catch (e) {
+    stdout = e.stdout || ''
+    log(`bench run ended early: ${e.message.split('\n')[0]}`)
+  } finally {
+    rmSync(driverFile, { force: true })
+  }
+  const benches = {}
+  for (const line of stdout.split('\n')) {
+    const m = /^([A-Za-z]+): (\d+)/.exec(line.trim())
+    if (m && BENCH_LABELS[m[1]]) benches[m[1]] = Number(m[2])
+    const s = /^Score \(version 7\): (\d+)/.exec(line.trim())
+    if (s) benches.__composite = Number(s[1])
+  }
+  const composite = benches.__composite ?? null
+  delete benches.__composite
+  if (Object.keys(benches).length === 0) {
+    log('bench produced no scores — null')
+    return null
+  }
+  return { date: DATE, lumen_sha: SHA, composite, benches }
+}
+
+mkdirSync(OUT, { recursive: true })
+const t262 = await runTest262()
+const surfaces = await runSurfaces()
+const bench = await runBench()
+
+writeFileSync(join(OUT, 'test262.json'), JSON.stringify(t262))
+writeFileSync(join(OUT, 'surfaces.json'), JSON.stringify(surfaces))
+writeFileSync(join(OUT, 'bench.json'), JSON.stringify(bench))
+log(`wrote ${OUT}`)
+if (t262) log(`  test262: ${t262.total.pass}/${t262.total.pass + t262.total.fail} (${t262.pass_rate}%)`)
+if (surfaces?.wintertc) log(`  wintertc: ${surfaces.wintertc.supported.length}/${surfaces.wintertc.total}`)
+if (bench) log(`  bench composite: ${bench.composite}`)

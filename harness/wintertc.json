@@ -1,0 +1,26 @@
+{
+  "comment": "WinterTC Minimum Common API globals, mirrored from lumen crates/lumen-runtime/src/tests.rs WINTERTC_SUPPORTED + BEYOND_MINIMUM. The probe checks globalThis for each name.",
+  "minimum": [
+    "globalThis", "queueMicrotask", "structuredClone", "atob", "btoa", "fetch", "console",
+    "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+    "Event", "EventTarget", "CustomEvent", "DOMException",
+    "AbortController", "AbortSignal",
+    "TextEncoder", "TextDecoder", "URL", "URLSearchParams",
+    "Headers", "Request", "Response",
+    "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamDefaultController",
+    "crypto", "Crypto", "SubtleCrypto",
+    "performance", "Performance", "navigator", "self",
+    "Blob", "File", "FormData",
+    "WritableStream", "WritableStreamDefaultWriter", "WritableStreamDefaultController",
+    "TransformStream", "TransformStreamDefaultController",
+    "ByteLengthQueuingStrategy", "CountQueuingStrategy",
+    "TextEncoderStream", "TextDecoderStream", "URLPattern",
+    "CompressionStream", "DecompressionStream",
+    "ReadableStreamBYOBReader", "ReadableByteStreamController", "ReadableStreamBYOBRequest",
+    "WebAssembly", "reportError", "onerror", "onunhandledrejection"
+  ],
+  "beyond_minimum": [
+    "Worker", "WebSocket", "EventSource", "MessageChannel", "MessagePort", "BroadcastChannel",
+    "MessageEvent", "CloseEvent", "ErrorEvent", "PromiseRejectionEvent"
+  ]
+}
