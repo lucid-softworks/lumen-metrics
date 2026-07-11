@@ -103,6 +103,7 @@ const REF_DEFS = [
   { key: 'bun-jitless', label: 'bun (JIT off)' },
   { key: 'deno', label: 'deno' },
   { key: 'deno-jitless', label: 'deno --jitless' },
+  { key: 'quickjs', label: 'quickjs' },
 ]
 
 function RuntimeComparison({ last, activeTiers }) {

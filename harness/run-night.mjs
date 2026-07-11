@@ -272,14 +272,29 @@ const REF_RUNTIMES = [
       { key: 'deno-jitless', args: (f) => ['run', '--allow-read', '--v8-flags=--jitless', f] },
     ],
   },
+  {
+    key: 'quickjs',
+    candidates: [process.env.QJS_BIN, 'qjs', '/opt/homebrew/bin/qjs'],
+    versionArgs: ['-h'], // no --version flag; -h leads with "QuickJS version <date>"
+    // a pure interpreter — no JIT to disable, so one mode only
+    modes: [{ key: 'quickjs', args: (f) => [f] }],
+  },
 ]
 
-function resolveRuntime(candidates) {
+function resolveRuntime(candidates, versionArgs = ['--version']) {
   for (const c of candidates.filter(Boolean)) {
+    let out
     try {
-      const v = execFileSync(c, ['--version'], { encoding: 'utf8', timeout: 10000 })
-      return { cmd: c, version: v.trim().split('\n')[0].replace(/^deno /, '').split(' ')[0].replace(/^v/, '') }
-    } catch { /* try next */ }
+      out = execFileSync(c, versionArgs, { encoding: 'utf8', timeout: 10000 })
+    } catch (e) {
+      // some CLIs print version/help but exit non-zero (qjs -h); a missing
+      // binary (ENOENT) has no output and falls through to the next candidate
+      out = [e.stdout, e.stderr].filter((s) => typeof s === 'string').join('\n').trim() || undefined
+    }
+    if (!out) continue
+    // first token containing a digit: "v22.16.0", "deno 2.9.1 (…)", "QuickJS version 2026-06-04"
+    const tok = out.trim().split('\n')[0].split(' ').find((t) => /\d/.test(t))
+    if (tok) return { cmd: c, version: tok.replace(/^v/, '') }
   }
   return null
 }
@@ -294,7 +309,7 @@ async function benchReferences(files, driverFile) {
   const out = {}
   try {
     for (const rt of REF_RUNTIMES) {
-      const resolved = resolveRuntime(rt.candidates)
+      const resolved = resolveRuntime(rt.candidates, rt.versionArgs)
       if (!resolved) {
         log(`reference runtime ${rt.key} not found — skipping`)
         continue
