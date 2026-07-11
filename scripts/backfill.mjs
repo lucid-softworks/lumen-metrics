@@ -25,27 +25,7 @@ const TARGET = process.env.CARGO_TARGET_DIR || '/tmp/lumen-build'
 const CUTOFF = 'T03:00:00Z' // matches lumen's own nightly schedule
 const DAY = 86400000
 
-const SYNTHETIC_WORKSPACE = `# synthesized by lumen-metrics backfill: this commit predates the extraction
-# of lumen from its parent monorepo, so the workspace root is missing here.
-[workspace]
-resolver = "2"
-members = ["crates/*"]
-
-[workspace.package]
-version = "0.0.0"
-edition = "2021"
-license = "MIT"
-
-[workspace.lints.clippy]
-type_complexity = "allow"
-too_many_arguments = "allow"
-doc_lazy_continuation = "allow"
-needless_range_loop = "allow"
-
-[profile.release]
-opt-level = 3
-lto = "thin"
-`
+const SYNTHETIC_WORKSPACE = readFileSync(join(ROOT, 'harness', 'synthetic-workspace.toml'), 'utf8')
 
 const git = (dir, ...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).trim()
 const sh = (cmd, a, opts = {}) => execFileSync(cmd, a, { stdio: 'inherit', ...opts })

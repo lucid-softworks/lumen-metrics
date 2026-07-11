@@ -53,7 +53,8 @@ function cargoBuild(pkgs) {
 
 async function runTest262() {
   log('building test262-runner…')
-  if (!cargoBuild(['test262-runner'])) {
+  rmSync(bin('test262-runner'), { force: true })
+  if (!cargoBuild(['test262-runner']) || !existsSync(bin('test262-runner'))) {
     log('test262-runner failed to build — recording null')
     return null
   }
@@ -137,7 +138,8 @@ async function runSurfaces() {
     return null
   }
   log('building lumen-cli…')
-  if (!cargoBuild(['lumen-cli'])) {
+  rmSync(bin('lumen-cli'), { force: true })
+  if (!cargoBuild(['lumen-cli']) || !existsSync(bin('lumen-cli'))) {
     log('lumen-cli failed to build — surfaces null')
     return null
   }
@@ -210,32 +212,15 @@ async function ensureV8() {
   }
 }
 
-async function runBench() {
-  if (!(await ensureV8())) {
-    log('no v8-v7 suite — bench null')
-    return null
-  }
-  log('building lumen (bare engine)…')
-  if (!cargoBuild(['lumen'])) {
-    log('lumen bin failed to build — bench null')
-    return null
-  }
-  // upstream run.js uses shell load(); the CLI takes files in sequence instead
-  const driver = readFileSync(join(V8DIR, 'run.js'), 'utf8').split('\n').filter((l) => !l.startsWith('load(')).join('\n')
-  const driverFile = join(OUT, '.driver.js')
-  writeFileSync(driverFile, driver)
-  const files = ['base.js', 'richards.js', 'deltablue.js', 'crypto.js', 'raytrace.js', 'earley-boyer.js', 'regexp.js', 'splay.js', 'navier-stokes.js']
-    .map((f) => join(V8DIR, f))
-  log('running v8-v7 bench…')
+async function benchOneTier(files, driverFile, tierFlag) {
   let stdout = ''
   try {
-    const res = await run(bin('lumen'), [...files, driverFile], { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 16 })
+    const args = tierFlag ? [tierFlag, ...files, driverFile] : [...files, driverFile]
+    const res = await run(bin('lumen'), args, { timeout: 1000 * 60 * 15, maxBuffer: 1024 * 1024 * 16 })
     stdout = res.stdout
   } catch (e) {
     stdout = e.stdout || ''
-    log(`bench run ended early: ${e.message.split('\n')[0]}`)
-  } finally {
-    rmSync(driverFile, { force: true })
+    log(`bench run (${tierFlag || 'default'}) ended early: ${e.message.split('\n')[0]}`)
   }
   const benches = {}
   for (const line of stdout.split('\n')) {
@@ -246,22 +231,76 @@ async function runBench() {
   }
   const composite = benches.__composite ?? null
   delete benches.__composite
-  if (Object.keys(benches).length === 0) {
+  return Object.keys(benches).length ? { composite, benches } : null
+}
+
+async function runBench() {
+  // the bare `lumen` bin didn't exist for the earliest commits; without this
+  // guard a lib-only `cargo build -p lumen` "succeeds" and the shared target
+  // dir serves another night's binary — silently benchmarking the wrong engine
+  const binSrc = join(LUMEN, 'crates', 'lumen', 'src', 'bin', 'lumen.rs')
+  if (!existsSync(binSrc)) {
+    log('no bare `lumen` bin at this commit — bench null')
+    return null
+  }
+  if (!(await ensureV8())) {
+    log('no v8-v7 suite — bench null')
+    return null
+  }
+  log('building lumen (bare engine)…')
+  rmSync(bin('lumen'), { force: true })
+  if (!cargoBuild(['lumen']) || !existsSync(bin('lumen'))) {
+    log('lumen bin failed to build — bench null')
+    return null
+  }
+
+  // detect which tiers this commit's CLI understands (jit landed later than
+  // interp/bytecode); each supported tier gets its own suite run
+  const binSource = readFileSync(binSrc, 'utf8')
+  const tiers = binSource.includes('--tier=')
+    ? ['interp', 'bytecode', ...(binSource.includes('"jit"') ? ['jit'] : [])]
+    : ['default']
+
+  // upstream run.js uses shell load(); the CLI takes files in sequence instead
+  const driver = readFileSync(join(V8DIR, 'run.js'), 'utf8').split('\n').filter((l) => !l.startsWith('load(')).join('\n')
+  const driverFile = join(OUT, '.driver.js')
+  writeFileSync(driverFile, driver)
+  const files = ['base.js', 'richards.js', 'deltablue.js', 'crypto.js', 'raytrace.js', 'earley-boyer.js', 'regexp.js', 'splay.js', 'navier-stokes.js']
+    .map((f) => join(V8DIR, f))
+
+  const out = {}
+  try {
+    for (const tier of tiers) {
+      log(`running v8-v7 bench (${tier})…`)
+      const r = await benchOneTier(files, driverFile, tier === 'default' ? null : `--tier=${tier}`)
+      if (r) out[tier] = r
+    }
+  } finally {
+    rmSync(driverFile, { force: true })
+  }
+  if (Object.keys(out).length === 0) {
     log('bench produced no scores — null')
     return null
   }
-  return { date: DATE, lumen_sha: SHA, composite, benches }
+  return { date: DATE, lumen_sha: SHA, tiers: out }
 }
 
+const ONLY = args.only || null
 mkdirSync(OUT, { recursive: true })
-const t262 = await runTest262()
-const surfaces = await runSurfaces()
-const bench = await runBench()
 
-writeFileSync(join(OUT, 'test262.json'), JSON.stringify(t262))
-writeFileSync(join(OUT, 'surfaces.json'), JSON.stringify(surfaces))
-writeFileSync(join(OUT, 'bench.json'), JSON.stringify(bench))
+if (!ONLY || ONLY === 'test262') {
+  const t262 = await runTest262()
+  writeFileSync(join(OUT, 'test262.json'), JSON.stringify(t262))
+  if (t262) log(`  test262: ${t262.total.pass}/${t262.total.pass + t262.total.fail} (${t262.pass_rate}%)`)
+}
+if (!ONLY || ONLY === 'surfaces') {
+  const surfaces = await runSurfaces()
+  writeFileSync(join(OUT, 'surfaces.json'), JSON.stringify(surfaces))
+  if (surfaces?.wintertc) log(`  wintertc: ${surfaces.wintertc.supported.length}/${surfaces.wintertc.total}`)
+}
+if (!ONLY || ONLY === 'bench') {
+  const bench = await runBench()
+  writeFileSync(join(OUT, 'bench.json'), JSON.stringify(bench))
+  if (bench) log(`  bench: ${Object.entries(bench.tiers).map(([t, r]) => `${t}=${r.composite}`).join(' ')}`)
+}
 log(`wrote ${OUT}`)
-if (t262) log(`  test262: ${t262.total.pass}/${t262.total.pass + t262.total.fail} (${t262.pass_rate}%)`)
-if (surfaces?.wintertc) log(`  wintertc: ${surfaces.wintertc.supported.length}/${surfaces.wintertc.total}`)
-if (bench) log(`  bench composite: ${bench.composite}`)

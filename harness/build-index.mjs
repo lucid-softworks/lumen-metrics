@@ -43,7 +43,10 @@ for (const date of dates) {
       : null,
     node: surfaces?.node ? sumModules(surfaces.node.modules) : null,
     bun: surfaces?.bun ? sumModules(surfaces.bun.surfaces) : null,
-    bench: bench ? { composite: bench.composite, benches: bench.benches } : null,
+    // normalize pre-tier bench files ({composite, benches}) to a single default tier
+    bench: bench
+      ? { tiers: bench.tiers ?? { default: { composite: bench.composite, benches: bench.benches } } }
+      : null,
   })
 }
 
