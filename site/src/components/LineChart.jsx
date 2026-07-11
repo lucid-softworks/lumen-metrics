@@ -32,7 +32,7 @@ function niceTicks(min, max, n = 4) {
  */
 export default function LineChart({
   title, caption, series, dates, yDomain = 'auto', yFmt = (v) => String(v),
-  height = 260, area = false, tableCaption,
+  height = 260, area = false, tableCaption, metaFor,
 }) {
   const wrapRef = useRef(null)
   const width = useWidth(wrapRef)
@@ -152,6 +152,7 @@ export default function LineChart({
             <thead>
               <tr className="text-left sticky top-0" style={{ background: 'var(--surface)', color: 'var(--muted)' }}>
                 <th className="py-1 pr-3 font-medium">Night</th>
+                {metaFor && <th className="py-1 pr-3 font-medium">Build</th>}
                 {series.map((s) => <th key={s.key} className="py-1 pr-3 font-medium">{s.label}</th>)}
               </tr>
             </thead>
@@ -159,6 +160,7 @@ export default function LineChart({
               {dates.map((d, i) => (
                 <tr key={d} style={{ borderTop: '1px solid var(--grid)', color: 'var(--ink-2)' }}>
                   <td className="py-1 pr-3">{d}</td>
+                  {metaFor && <td className="py-1 pr-3 font-mono text-[11.5px]">{metaFor(i) || '—'}</td>}
                   {series.map((s) => (
                     <td key={s.key} className="py-1 pr-3">{s.values[i] == null ? '—' : yFmt(s.values[i])}</td>
                   ))}
@@ -250,6 +252,9 @@ export default function LineChart({
               }}
             >
               <div style={{ color: 'var(--muted)' }}>{fmtDateLong(dates[hover])}</div>
+              {metaFor && metaFor(hover) && (
+                <div className="font-mono text-[11px]" style={{ color: 'var(--muted)' }}>{metaFor(hover)}</div>
+              )}
               {series.map((s) => (
                 <div key={s.key} className="flex items-center gap-2 mt-1">
                   <span className="inline-block w-3 h-[2.5px] rounded-full shrink-0" style={{ background: s.color }} />

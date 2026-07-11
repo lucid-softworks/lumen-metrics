@@ -78,6 +78,11 @@ export default function Conformance({ index, range }) {
         yDomain={[0, 100]}
         yFmt={fmtPctExact}
         height={280}
+        metaFor={(i) => {
+          const n = view[i]
+          if (!n?.lumen_sha) return null
+          return `lumen ${n.lumen_sha}${n.test262_sha ? ` · test262 ${n.test262_sha}` : ''}`
+        }}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

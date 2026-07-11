@@ -2,6 +2,7 @@ import { sliceRange, spark } from '../lib/data.js'
 import { fmtNum } from '../lib/format.js'
 import StatTile from '../components/StatTile.jsx'
 import LineChart from '../components/LineChart.jsx'
+import BarChart from '../components/BarChart.jsx'
 import Sparkline from '../components/Sparkline.jsx'
 
 const BENCH_NAMES = ['Richards', 'DeltaBlue', 'Crypto', 'RayTrace', 'EarleyBoyer', 'RegExp', 'Splay', 'NavierStokes']
@@ -65,7 +66,10 @@ export default function Performance({ index, range }) {
         dates={view.map((n) => n.date)}
         yFmt={(v) => fmtNum(Math.round(v))}
         height={280}
+        metaFor={(i) => (view[i]?.lumen_sha ? `lumen ${view[i].lumen_sha}` : null)}
       />
+
+      <RuntimeComparison last={last} activeTiers={activeTiers} />
 
       <section>
         <h2 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--ink)' }}>Per benchmark — {topDef.label} tier</h2>
@@ -81,6 +85,7 @@ export default function Performance({ index, range }) {
               dates={view.map((n) => n.date)}
               yFmt={(v) => fmtNum(Math.round(v))}
               height={140}
+              metaFor={(i) => (view[i]?.lumen_sha ? `lumen ${view[i].lumen_sha}` : null)}
             />
           ))}
         </div>
@@ -88,6 +93,54 @@ export default function Performance({ index, range }) {
 
       <LatestRunTable last={last} prev={prev} activeTiers={activeTiers} top={top} sameTier={sameTier} />
     </div>
+  )
+}
+
+const REF_DEFS = [
+  { key: 'node', label: 'node' },
+  { key: 'node-jitless', label: 'node --jitless' },
+  { key: 'bun', label: 'bun' },
+  { key: 'bun-jitless', label: 'bun (JIT off)' },
+  { key: 'deno', label: 'deno' },
+  { key: 'deno-jitless', label: 'deno --jitless' },
+]
+
+function RuntimeComparison({ last, activeTiers }) {
+  const refs = last.bench?.references
+  if (!refs) return null
+
+  const rows = [
+    ...activeTiers
+      .filter((t) => tierResult(last, t.key))
+      .map((t) => ({
+        key: `lumen-${t.key}`, label: `lumen ${t.label}`, sub: last.lumen_sha, value: tierResult(last, t.key).composite,
+        color: t.color, emphasis: true,
+      })),
+    ...REF_DEFS.filter((d) => refs[d.key]).map((d) => ({
+      key: d.key, label: d.label, sub: refs[d.key].version, value: refs[d.key].composite,
+      color: 'var(--axis)', emphasis: false,
+    })),
+  ].sort((a, b) => b.value - a.value)
+
+  const columns = rows.map((r) => r.label)
+  const benchesOf = (key) => key.startsWith('lumen-')
+    ? tierResult(last, key.slice(6))?.benches
+    : refs[key]?.benches
+  const detail = {
+    columns,
+    rows: BENCH_NAMES.map((name) => ({
+      label: name,
+      values: rows.map((r) => benchesOf(r.key)?.[name] ?? null),
+    })),
+  }
+
+  return (
+    <BarChart
+      title={`Against other runtimes — ${last.date}`}
+      caption="Same suite, same machine, measured the same night. The jitless rows disable each runtime's JIT — the like-for-like comparison while lumen's JIT matures. Longer is faster."
+      rows={rows}
+      detail={detail}
+    />
   )
 }
 
