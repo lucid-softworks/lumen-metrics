@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Design tokens — light default, dark via prefers-color-scheme.
+   Values from the validated reference dataviz palette. */
+:root {
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+
+  /* categorical series, fixed slot order (validated for CVD) */
+  --s1: #2a78d6; /* blue   — test262 / bench composite */
+  --s2: #1baf7a; /* aqua   — WinterTC                  */
+  --s3: #eda100; /* yellow — Node surface              */
+  --s4: #008300; /* green  — Bun surface               */
+
+  /* sequential blue ramp (coverage meters) */
+  --seq-track: #cde2fb;
+  --seq-fill: #256abf;
+
+  /* status (fixed, never themed) */
+  --good: #0ca30c;
+  --critical: #d03b3b;
+  --delta-up: #006300;
+  --delta-down: #b32222;
+
+  --wash: rgba(42, 120, 214, 0.1);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+
+    --s1: #3987e5;
+    --s2: #199e70;
+    --s3: #c98500;
+    --s4: #008300;
+
+    --seq-track: #184f95;
+    --seq-fill: #6da7ec;
+
+    --delta-up: #0ca30c;
+    --delta-down: #e66767;
+
+    --wash: rgba(57, 135, 229, 0.12);
+  }
+}
+
+html {
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
