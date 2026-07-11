@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { sliceRange, spark, useNight } from '../lib/data.js'
-import { fmtNum, fmtPct, pct, fmtDate } from '../lib/format.js'
+import { fmtNum, fmtPct, fmtPctExact, pct, fmtDate } from '../lib/format.js'
 import StatTile from '../components/StatTile.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Meter from '../components/Meter.jsx'
@@ -26,7 +26,7 @@ export default function Conformance({ index, range }) {
     key: d.key, label: d.label, short: d.short, color: d.color,
     values: view.map((n) => {
       const v = d.get(n)
-      return v == null ? null : Number(v.toFixed(2))
+      return v == null ? null : Number(v.toFixed(4))
     }),
   }))
 
@@ -36,7 +36,7 @@ export default function Conformance({ index, range }) {
       <div className="flex flex-wrap gap-3">
         <StatTile
           label="test262 conformance"
-          value={last.test262 ? fmtPct(t262Pct(last)) : '—'}
+          value={last.test262 ? fmtPctExact(t262Pct(last)) : '—'}
           sub={last.test262 ? `${fmtNum(last.test262.pass)} / ${fmtNum(last.test262.pass + last.test262.fail)}` : 'not measured'}
           delta={last.test262 && prev?.test262 ? last.test262.fail - prev.test262.fail : undefined}
           deltaLabel={last.test262 && prev?.test262 && last.test262.fail !== prev.test262.fail ? 'failures vs prev night' : 'vs prev night'}
@@ -76,7 +76,7 @@ export default function Conformance({ index, range }) {
         series={trendSeries}
         dates={view.map((n) => n.date)}
         yDomain={[0, 100]}
-        yFmt={(v) => fmtPct(v, v === Math.round(v) ? 0 : 2)}
+        yFmt={fmtPctExact}
         height={280}
       />
 
@@ -135,7 +135,7 @@ function CategoryTable({ date, prevDate }) {
                 </td>
                 <td className="py-1.5 pr-2">
                   <Meter value={r.pct} width={84} />
-                  <span className="ml-2" style={{ color: 'var(--ink-2)' }}>{fmtPct(r.pct, r.pct >= 99.99 ? 0 : 2)}</span>
+                  <span className="ml-2" style={{ color: 'var(--ink-2)' }}>{fmtPctExact(r.pct)}</span>
                 </td>
                 <td className="py-1.5 text-right" style={{ color: r.delta > 0 ? 'var(--delta-up)' : r.delta < 0 ? 'var(--delta-down)' : 'var(--muted)' }}>
                   {r.delta == null || r.delta === 0 ? '·' : `${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)}`}
